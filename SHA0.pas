@@ -9,15 +9,33 @@
 
   SHA0 Hash Calculation
 
-  ©František Milt 2015-05-07
+  ©František Milt 2015-12-13
 
-  Version 1.1.1
+  Version 1.1.2
 
 ===============================================================================}
 unit SHA0;
 
 {$DEFINE LargeBuffer}
-{.$DEFINE UseStringStream}
+
+{$IF defined(CPUX86_64) or defined(CPUX64)}
+  {$DEFINE x64}
+  {$IF not(defined(WINDOWS) or defined(MSWINDOWS))}
+    {$DEFINE PurePascal}
+  {$IFEND}
+{$ELSEIF defined(CPU386)}
+  {$DEFINE x86}
+{$ELSE}
+  {$DEFINE PurePascal}
+{$IFEND}
+
+{$IF defined(FPC) and not defined(PurePascal)}
+  {$ASMMODE Intel}
+{$IFEND}
+
+{$IFDEF ENDIAN_BIG}
+  {$MESSAGE FATAL 'Big-endian system not supported'}
+{$ENDIF}
 
 {$IFOPT Q+}
   {$DEFINE OverflowCheck}
@@ -26,30 +44,15 @@ unit SHA0;
 interface
 
 uses
-  Classes;
+  Classes, AuxTypes;
 
 type
-{$IFDEF FPC}
-  QuadWord = QWord;
-{$ELSE}
-  QuadWord = Int64;
-{$ENDIF}
-  PQuadWord = ^QuadWord;
-
-{$IFDEF x64}
-  PtrUInt = UInt64;
-{$ELSE}
-  PtrUInt = LongWord;
-{$ENDIF}
-
-  TSize = PtrUInt;
-
-  TSHA0Hash = Record
-    PartA:  LongWord;
-    PartB:  LongWord;
-    PartC:  LongWord;
-    PartD:  LongWord;
-    PartE:  LongWord;
+  TSHA0Hash = record
+    PartA:  UInt32;
+    PartB:  UInt32;
+    PartC:  UInt32;
+    PartD:  UInt32;
+    PartE:  UInt32;
   end;
   PSHA0Hash = ^TSHA0Hash;
 
@@ -69,11 +72,11 @@ Function TryStrToSHA0(const Str: String; out Hash: TSHA0Hash): Boolean;
 Function StrToSHA0Def(const Str: String; Default: TSHA0Hash): TSHA0Hash;
 Function SameSHA0(A,B: TSHA0Hash): Boolean;
 
-procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TSize); overload;
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TSize; MessageLength: QuadWord): TSHA0Hash; overload;
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TSize): TSHA0Hash; overload;
+procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TMemSize); overload;
+Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0Hash; overload;
+Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize): TSHA0Hash; overload;
 
-Function BufferSHA0(const Buffer; Size: TSize): TSHA0Hash; overload;
+Function BufferSHA0(const Buffer; Size: TMemSize): TSHA0Hash; overload;
 
 Function AnsiStringSHA0(const Str: AnsiString): TSHA0Hash;
 Function WideStringSHA0(const Str: WideString): TSHA0Hash;
@@ -88,10 +91,10 @@ type
   TSHA0Context = type Pointer;
 
 Function SHA0_Init: TSHA0Context;
-procedure SHA0_Update(Context: TSHA0Context; const Buffer; Size: TSize);
-Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TSize): TSHA0Hash; overload;
+procedure SHA0_Update(Context: TSHA0Context; const Buffer; Size: TMemSize);
+Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TMemSize): TSHA0Hash; overload;
 Function SHA0_Final(var Context: TSHA0Context): TSHA0Hash; overload;
-Function SHA0_Hash(const Buffer; Size: TSize): TSHA0Hash;
+Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0Hash;
 
 
 implementation
@@ -108,48 +111,39 @@ const
 {$ENDIF}
   BufferSize      = BlocksPerBuffer * BlockSize;  // size of read buffer
 
-  RoundConsts: Array[0..3] of LongWord = ($5A827999, $6ED9EBA1, $8F1BBCDC, $CA62C1D6);
+  RoundConsts: array[0..3] of UInt32 = ($5A827999, $6ED9EBA1, $8F1BBCDC, $CA62C1D6);
 
 type
-  TBlockBuffer = Array[0..BlockSize - 1] of Byte;
+  TBlockBuffer = array[0..BlockSize - 1] of UInt8;
   PBlockBuffer = ^TBlockBuffer;
 
   TSHA0Context_Internal = record
     MessageHash:    TSHA0Hash;
-    MessageLength:  QuadWord;
-    TransferSize:   LongWord;
+    MessageLength:  UInt64;
+    TransferSize:   UInt32;
     TransferBuffer: TBlockBuffer;
   end;
   PSHA0Context_Internal = ^TSHA0Context_Internal;
 
 //==============================================================================
 
-{$IFDEF FPC}{$ASMMODE intel}{$ENDIF}
-
-Function EndianSwap(Value: LongWord): LongWord;{$IFNDEF PurePascal}assembler;{$ENDIF} overload;
-{$IFDEF PurePascal}
-begin
-Result := LongWord((Value and $000000FF shl 24) or (Value and $0000FF00 shl 8) or
-                   (Value and $00FF0000 shr 8) or (Value and $FF000000 shr 24));
-end;
-{$ELSE}
+Function EndianSwap(Value: UInt32): UInt32; register; overload; {$IFNDEF PurePascal}assembler;
 asm
 {$IFDEF x64}
     MOV   RAX,  RCX
 {$ENDIF}
     BSWAP EAX
 end;
+{$ELSE}
+begin
+Result := UInt32((Value and $000000FF shl 24) or (Value and $0000FF00 shl 8) or
+                 (Value and $00FF0000 shr 8) or (Value and $FF000000 shr 24));
+end;
 {$ENDIF}
 
 //------------------------------------------------------------------------------
 
-Function EndianSwap(Value: QuadWord): QuadWord;{$IFNDEF PurePascal}assembler;{$ENDIF} overload;
-{$IFDEF PurePascal}
-begin
-Int64Rec(Result).Hi := EndianSwap(Int64Rec(Value).Lo);
-Int64Rec(Result).Lo := EndianSwap(Int64Rec(Value).Hi);
-end;
-{$ELSE}
+Function EndianSwap(Value: UInt64): UInt64; register; overload; {$IFNDEF PurePascal}assembler;
 asm
 {$IFDEF x64}
     MOV   RAX,  RCX
@@ -161,23 +155,27 @@ asm
     BSWAP EDX
 {$ENDIF}
 end;
+{$ELSE}
+begin
+Int64Rec(Result).Hi := EndianSwap(Int64Rec(Value).Lo);
+Int64Rec(Result).Lo := EndianSwap(Int64Rec(Value).Hi);
+end;
 {$ENDIF}
 
 //------------------------------------------------------------------------------
 
-Function LeftRotate(Value: LongWord; Shift: Byte): LongWord;{$IFNDEF PurePascal}assembler;{$ENDIF}
-{$IFDEF PurePascal}
-begin
-Shift := Shift and $1F;
-Result := LongWord((Value shl Shift) or (Value shr (32 - Shift)));
-end;
-{$ELSE}
+Function LeftRotate(Value: UInt32; Shift: Byte): UInt32; register; {$IFNDEF PurePascal}assembler;
 asm
 {$IFDEF x64}
     MOV   EAX,  ECX
 {$ENDIF}
     MOV   CL,   DL
     ROL   EAX,  CL
+end;
+{$ELSE}
+begin
+Shift := Shift and $1F;
+Result := UInt32((Value shl Shift) or (Value shr (32 - Shift)));
 end;
 {$ENDIF}
 
@@ -186,11 +184,11 @@ end;
 Function BlockHash(Hash: TSHA0Hash; const Block): TSHA0Hash;
 var
   i:              Integer;
-  Temp:           LongWord;
-  FuncResult:     LongWord;
-  RoundConstant:  LongWord;
-  State:          Array[0..79] of LongWord;  
-  BlockWords:     Array[0..15] of LongWord absolute Block;
+  Temp:           UInt32;
+  FuncResult:     UInt32;
+  RoundConstant:  UInt32;
+  State:          array[0..79] of UInt32;  
+  BlockWords:     array[0..15] of UInt32 absolute Block;
 begin
 Result := Hash;
 For i := 0 to 15 do State[i] := EndianSwap(BlockWords[i]);
@@ -215,7 +213,7 @@ For i := 0 to 79 do
                 RoundConstant := RoundConsts[3];
     end;
     {$IFDEF OverflowCheck}{$Q-}{$ENDIF}
-    Temp := LongWord(LeftRotate(Hash.PartA,5) + FuncResult + Hash.PartE + RoundConstant + State[i]);
+    Temp := UInt32(LeftRotate(Hash.PartA,5) + FuncResult + Hash.PartE + RoundConstant + State[i]);
     {$IFDEF OverflowCheck}{$Q+}{$ENDIF}
     Hash.PartE := Hash.PartD;
     Hash.PartD := Hash.PartC;
@@ -224,11 +222,11 @@ For i := 0 to 79 do
     Hash.PartA := Temp;
   end;
 {$IFDEF OverflowCheck}{$Q-}{$ENDIF}
-Result.PartA := LongWord(Result.PartA + Hash.PartA);
-Result.PartB := LongWord(Result.PartB + Hash.PartB);
-Result.PartC := LongWord(Result.PartC + Hash.PartC);
-Result.PartD := LongWord(Result.PartD + Hash.PartD);
-Result.PartE := LongWord(Result.PartE + Hash.PartE);
+Result.PartA := UInt32(Result.PartA + Hash.PartA);
+Result.PartB := UInt32(Result.PartB + Hash.PartB);
+Result.PartC := UInt32(Result.PartC + Hash.PartC);
+Result.PartD := UInt32(Result.PartD + Hash.PartD);
+Result.PartE := UInt32(Result.PartE + Hash.PartE);
 {$IFDEF OverflowCheck}{$Q+}{$ENDIF}
 end;
 
@@ -288,9 +286,9 @@ end;
 
 //==============================================================================
 
-procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TSize);
+procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TMemSize);
 var
-  i:    TSize;
+  i:    TMemSize;
   Buff: PBlockBuffer;
 begin
 If Size > 0 then
@@ -310,31 +308,23 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TSize; MessageLength: QuadWord): TSHA0Hash;
+Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0Hash;
 var
-  FullBlocks:     TSize;
-  LastBlockSize:  TSize;
-  HelpBlocks:     TSize;
+  FullBlocks:     TMemSize;
+  LastBlockSize:  TMemSize;
+  HelpBlocks:     TMemSize;
   HelpBlocksBuff: Pointer;
 begin
 Result := Hash;
 FullBlocks := Size div BlockSize;
 If FullBlocks > 0 then BufferSHA0(Result,Buffer,FullBlocks * BlockSize);
-{$IFDEF x64}
-LastBlockSize := Size - (FullBlocks * BlockSize);
-{$ELSE}
-LastBlockSize := Size - (Int64(FullBlocks) * BlockSize);
-{$ENDIF}
-HelpBlocks := Ceil((LastBlockSize + SizeOf(QuadWord) + 1) / BlockSize);
+LastBlockSize := Size - (UInt64(FullBlocks) * BlockSize);
+HelpBlocks := Ceil((LastBlockSize + SizeOf(UInt64) + 1) / BlockSize);
 HelpBlocksBuff := AllocMem(HelpBlocks * BlockSize);
 try
   Move({%H-}Pointer({%H-}PtrUInt(@Buffer) + (FullBlocks * BlockSize))^,HelpBlocksBuff^,LastBlockSize);
-  {%H-}PByte({%H-}PtrUInt(HelpBlocksBuff) + LastBlockSize)^ := $80;
-  {$IFDEF x64}
-  {%H-}PQuadWord({%H-}PtrUInt(HelpBlocksBuff) + (HelpBlocks * BlockSize) - SizeOf(QuadWord))^ := EndianSwap(MessageLength);
-  {$ELSE}
-  {%H-}PQuadWord({%H-}PtrUInt(HelpBlocksBuff) + (Int64(HelpBlocks) * BlockSize) - SizeOf(QuadWord))^ := EndianSwap(MessageLength);
-  {$ENDIF}
+  {%H-}PUInt8({%H-}PtrUInt(HelpBlocksBuff) + LastBlockSize)^ := $80;
+  {%H-}PUInt64({%H-}PtrUInt(HelpBlocksBuff) + (UInt64(HelpBlocks) * BlockSize) - SizeOf(UInt64))^ := EndianSwap(MessageLength);
   BufferSHA0(Result,HelpBlocksBuff^,HelpBlocks * BlockSize);
 finally
   FreeMem(HelpBlocksBuff,HelpBlocks * BlockSize);
@@ -343,14 +333,14 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TSize): TSHA0Hash;
+Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize): TSHA0Hash;
 begin
-Result := LastBufferSHA0(Hash,Buffer,Size,Size shl 3);
+Result := LastBufferSHA0(Hash,Buffer,Size,UInt64(Size) shl 3);
 end;
 
 //==============================================================================
 
-Function BufferSHA0(const Buffer; Size: TSize): TSHA0Hash;
+Function BufferSHA0(const Buffer; Size: TMemSize): TSHA0Hash;
 begin
 Result := LastBufferSHA0(InitialSHA0,Buffer,Size);
 end;
@@ -358,62 +348,23 @@ end;
 //==============================================================================
 
 Function AnsiStringSHA0(const Str: AnsiString): TSHA0Hash;
-{$IFDEF UseStringStream}
-var
-  StringStream: TStringStream;
-begin
-StringStream := TStringStream.Create(Str);
-try
-  Result := StreamSHA0(StringStream);
-finally
-  StringStream.Free;
-end;
-end;
-{$ELSE}
 begin
 Result := BufferSHA0(PAnsiChar(Str)^,Length(Str) * SizeOf(AnsiChar));
 end;
-{$ENDIF}
 
 //------------------------------------------------------------------------------
 
 Function WideStringSHA0(const Str: WideString): TSHA0Hash;
-{$IFDEF UseStringStream}
-var
-  StringStream: TStringStream;
-begin
-StringStream := TStringStream.Create(Str);
-try
-  Result := StreamSHA0(StringStream);
-finally
-  StringStream.Free;
-end;
-end;
-{$ELSE}
 begin
 Result := BufferSHA0(PWideChar(Str)^,Length(Str) * SizeOf(WideChar));
 end;
-{$ENDIF}
 
 //------------------------------------------------------------------------------
 
 Function StringSHA0(const Str: String): TSHA0Hash;
-{$IFDEF UseStringStream}
-var
-  StringStream: TStringStream;
-begin
-StringStream := TStringStream.Create(Str);
-try
-  Result := StreamSHA0(StringStream);
-finally
-  StringStream.Free;
-end;
-end;
-{$ELSE}
 begin
 Result := BufferSHA0(PChar(Str)^,Length(Str) * SizeOf(Char));
 end;
-{$ENDIF}
 
 //==============================================================================
 
@@ -421,7 +372,7 @@ Function StreamSHA0(Stream: TStream; Count: Int64 = -1): TSHA0Hash;
 var
   Buffer:         Pointer;
   BytesRead:      Integer;
-  MessageLength:  QuadWord;
+  MessageLength:  UInt64;
 begin
 If Assigned(Stream) then
   begin
@@ -432,7 +383,7 @@ If Assigned(Stream) then
         Stream.Position := 0;
         Count := Stream.Size;
       end;
-    MessageLength := QuadWord(Count shl 3);
+    MessageLength := UInt64(Count shl 3);
     GetMem(Buffer,BufferSize);
     try
       Result := InitialSHA0;
@@ -480,10 +431,10 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure SHA0_Update(Context: TSHA0Context; const Buffer; Size: TSize);
+procedure SHA0_Update(Context: TSHA0Context; const Buffer; Size: TMemSize);
 var
-  FullBlocks:     TSize;
-  RemainingSize:  TSize;
+  FullBlocks:     TMemSize;
+  RemainingSize:  TMemSize;
 begin
 with PSHA0Context_Internal(Context)^ do
   begin
@@ -512,11 +463,7 @@ with PSHA0Context_Internal(Context)^ do
         BufferSHA0(MessageHash,Buffer,FullBlocks * BlockSize);
         If (FullBlocks * BlockSize) < Size then
           begin
-            {$IFDEF x64}
-            TransferSize := Size - (FullBlocks * BlockSize);
-            {$ELSE}
-            TransferSize := Size - (Int64(FullBlocks) * BlockSize);
-            {$ENDIF}
+            TransferSize := Size - (UInt64(FullBlocks) * BlockSize);
             Move({%H-}Pointer({%H-}PtrUInt(@Buffer) + (Size - TransferSize))^,TransferBuffer,TransferSize);
           end;
       end;
@@ -525,7 +472,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TSize): TSHA0Hash;
+Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TMemSize): TSHA0Hash;
 begin
 SHA0_Update(Context,Buffer,Size);
 Result := SHA0_Final(Context);
@@ -543,7 +490,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function SHA0_Hash(const Buffer; Size: TSize): TSHA0Hash;
+Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0Hash;
 begin
 Result := LastBufferSHA0(InitialSHA0,Buffer,Size);
 end;
