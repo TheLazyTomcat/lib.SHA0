@@ -9,9 +9,9 @@
 
   SHA0 Hash Calculation
 
-  ©František Milt 2015-12-13
+  ©František Milt 2016-03-01
 
-  Version 1.1.2
+  Version 1.1.3
 
 ===============================================================================}
 unit SHA0;
@@ -100,7 +100,14 @@ Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0Hash;
 implementation
 
 uses
-  SysUtils, Math;
+  SysUtils, Math
+  {$IF Defined(FPC) and not Defined(Unicode)}
+  (*
+    If compiler throws error that LazUTF8 unit cannot be found, you have to
+    add LazUtils to required packages (Project > Project Inspector).
+  *)
+  , LazUTF8
+  {$IFEND};
 
 const
   BlockSize       = 64;                           // 512 bits
@@ -408,7 +415,11 @@ Function FileSHA0(const FileName: String): TSHA0Hash;
 var
   FileStream: TFileStream;
 begin
+{$IF Defined(FPC) and not Defined(Unicode)}
+FileStream := TFileStream.Create(UTF8ToSys(FileName), fmOpenRead or fmShareDenyWrite);
+{$ELSE}
 FileStream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
+{$IFEND}
 try
   Result := StreamSHA0(FileStream);
 finally
