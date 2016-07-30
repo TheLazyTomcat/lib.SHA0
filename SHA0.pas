@@ -9,9 +9,9 @@
 
   SHA0 Hash Calculation
 
-  ©František Milt 2016-03-01
+  ©František Milt 2016-07-30
 
-  Version 1.1.3
+  Version 1.1.4
 
 ===============================================================================}
 unit SHA0;
@@ -71,6 +71,7 @@ Function StrToSHA0(Str: String): TSHA0Hash;
 Function TryStrToSHA0(const Str: String; out Hash: TSHA0Hash): Boolean;
 Function StrToSHA0Def(const Str: String; Default: TSHA0Hash): TSHA0Hash;
 Function SameSHA0(A,B: TSHA0Hash): Boolean;
+Function BinaryCorrectSHA0(Hash: TSHA0Hash): TSHA0Hash;
 
 procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TMemSize); overload;
 Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0Hash; overload;
@@ -100,7 +101,7 @@ Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0Hash;
 implementation
 
 uses
-  SysUtils, Math
+  SysUtils, Math, BitOps
   {$IF Defined(FPC) and not Defined(Unicode)}
   (*
     If compiler throws error that LazUTF8 unit cannot be found, you have to
@@ -131,60 +132,6 @@ type
     TransferBuffer: TBlockBuffer;
   end;
   PSHA0Context_Internal = ^TSHA0Context_Internal;
-
-//==============================================================================
-
-Function EndianSwap(Value: UInt32): UInt32; register; overload; {$IFNDEF PurePascal}assembler;
-asm
-{$IFDEF x64}
-    MOV   RAX,  RCX
-{$ENDIF}
-    BSWAP EAX
-end;
-{$ELSE}
-begin
-Result := UInt32((Value and $000000FF shl 24) or (Value and $0000FF00 shl 8) or
-                 (Value and $00FF0000 shr 8) or (Value and $FF000000 shr 24));
-end;
-{$ENDIF}
-
-//------------------------------------------------------------------------------
-
-Function EndianSwap(Value: UInt64): UInt64; register; overload; {$IFNDEF PurePascal}assembler;
-asm
-{$IFDEF x64}
-    MOV   RAX,  RCX
-    BSWAP RAX
-{$ELSE}
-    MOV   EAX,  dword ptr [Value + 4]
-    MOV   EDX,  dword ptr [Value]
-    BSWAP EAX
-    BSWAP EDX
-{$ENDIF}
-end;
-{$ELSE}
-begin
-Int64Rec(Result).Hi := EndianSwap(Int64Rec(Value).Lo);
-Int64Rec(Result).Lo := EndianSwap(Int64Rec(Value).Hi);
-end;
-{$ENDIF}
-
-//------------------------------------------------------------------------------
-
-Function LeftRotate(Value: UInt32; Shift: Byte): UInt32; register; {$IFNDEF PurePascal}assembler;
-asm
-{$IFDEF x64}
-    MOV   EAX,  ECX
-{$ENDIF}
-    MOV   CL,   DL
-    ROL   EAX,  CL
-end;
-{$ELSE}
-begin
-Shift := Shift and $1F;
-Result := UInt32((Value shl Shift) or (Value shr (32 - Shift)));
-end;
-{$ENDIF}
 
 //==============================================================================
 
@@ -220,11 +167,11 @@ For i := 0 to 79 do
                 RoundConstant := RoundConsts[3];
     end;
     {$IFDEF OverflowCheck}{$Q-}{$ENDIF}
-    Temp := UInt32(LeftRotate(Hash.PartA,5) + FuncResult + Hash.PartE + RoundConstant + State[i]);
+    Temp := UInt32(ROL(Hash.PartA,5) + FuncResult + Hash.PartE + RoundConstant + State[i]);
     {$IFDEF OverflowCheck}{$Q+}{$ENDIF}
     Hash.PartE := Hash.PartD;
     Hash.PartD := Hash.PartC;
-    Hash.PartC := LeftRotate(Hash.PartB,30);
+    Hash.PartC := ROL(Hash.PartB,30);
     Hash.PartB := Hash.PartA;
     Hash.PartA := Temp;
   end;
@@ -289,6 +236,17 @@ begin
 Result := (A.PartA = B.PartA) and (A.PartB = B.PartB) and
           (A.PartC = B.PartC) and (A.PartD = B.PartD) and
           (A.PartE = B.PartE);
+end;
+
+//------------------------------------------------------------------------------
+
+Function BinaryCorrectSHA0(Hash: TSHA0Hash): TSHA0Hash;
+begin
+Result.PartA := EndianSwap(Hash.PartA);
+Result.PartB := EndianSwap(Hash.PartB);
+Result.PartC := EndianSwap(Hash.PartC);
+Result.PartD := EndianSwap(Hash.PartD);
+Result.PartE := EndianSwap(Hash.PartE);
 end;
 
 //==============================================================================
