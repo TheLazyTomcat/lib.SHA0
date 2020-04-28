@@ -7,94 +7,171 @@
 -------------------------------------------------------------------------------}
 {===============================================================================
 
-  SHA0 Hash Calculation
+  SHA0 calculation
 
-  ©František Milt 2018-10-22
+    Note that this unit is just a copy of SHA1 implementation with slightly
+    altered block calculation (SHA1 differs from SHA0 only in this small
+    detail).
 
-  Version 1.1.6
+  Version 1.2 (2020-04-28)
+
+  Last change 2020-04-28
+
+  ©2015-2020 František Milt
+
+  Contacts:
+    František Milt: frantisek.milt@gmail.com
+
+  Support:
+    If you find this code useful, please consider supporting its author(s) by
+    making a small donation using the following link(s):
+
+      https://www.paypal.me/FMilt
+
+  Changelog:
+    For detailed changelog and history please refer to this git repository:
+
+      github.com/TheLazyTomcat/Lib.SHA0
 
   Dependencies:
-    AuxTypes    - github.com/ncs-sniper/Lib.AuxTypes
-    StrRect     - github.com/ncs-sniper/Lib.StrRect
-    BitOps      - github.com/ncs-sniper/Lib.BitOps
-  * SimpleCPUID - github.com/ncs-sniper/Lib.SimpleCPUID
+    AuxTypes           - github.com/TheLazyTomcat/Lib.AuxTypes
+    HashBase           - github.com/TheLazyTomcat/Lib.HashBase
+    AuxClasses         - github.com/TheLazyTomcat/Lib.AuxClasses
+    StrRect            - github.com/TheLazyTomcat/Lib.StrRect
+    StaticMemoryStream - github.com/TheLazyTomcat/Lib.StaticMemoryStream
+    BitOps             - github.com/TheLazyTomcat/Lib.BitOps
+  * SimpleCPUID        - github.com/TheLazyTomcat/Lib.SimpleCPUID
 
   SimpleCPUID might not be needed, see BitOps library for details.
 
 ===============================================================================}
 unit SHA0;
 
-{$DEFINE LargeBuffer}
-
-{$IFDEF ENDIAN_BIG}
-  {$MESSAGE FATAL 'Big-endian system not supported'}
+{$IFDEF FPC}
+  {$MODE Delphi}
+  {$DEFINE FPC_DisableWarns}
+  {$MACRO ON}
 {$ENDIF}
 
 {$IFOPT Q+}
-  {$DEFINE OverflowCheck}
-{$ENDIF}
-
-{$IFDEF FPC}
-  {$MODE ObjFPC}{$H+}
-  {$INLINE ON}
-  {$DEFINE CanInline}  
-  {$DEFINE FPC_DisableWarns}
-  {$MACRO ON}
-{$ELSE}
-  {$IF CompilerVersion >= 17 then}  // Delphi 2005+
-    {$DEFINE CanInline}
-  {$ELSE}
-    {$UNDEF CanInline}
-  {$IFEND}
+  {$DEFINE OverflowChecks}
 {$ENDIF}
 
 interface
 
 uses
-  Classes, AuxTypes;
+  Classes,
+  AuxTypes, HashBase;
 
+{===============================================================================
+    Common types and constants
+===============================================================================}
+{
+  Bytes in type TSHA0 are always ordered from most significant byte to least
+  significant byte (big endian).
+  
+  Type TSHA0Sys has no such guarantee and its internal structure depends on
+  current implementation.
+
+  SHA0 does not differ in little and big endian form, as it is not a single
+  quantity, therefore methods like SHA0ToLE or SHA0ToBE do nothing and are
+  present only for the sake of completeness.
+}
 type
-  TSHA0Hash = record
+  TSHA0 = array[0..19] of UInt8;
+  PSHA0 = ^TSHA0;
+
+  TSHA0Sys = record
     PartA:  UInt32;
     PartB:  UInt32;
     PartC:  UInt32;
     PartD:  UInt32;
     PartE:  UInt32;
   end;
-  PSHA0Hash = ^TSHA0Hash;
+  PSHA0Sys = ^TSHA0Sys;
 
 const
-  InitialSHA0: TSHA0Hash = (
-    PartA:  $67452301;
-    PartB:  $EFCDAB89;
-    PartC:  $98BADCFE;
-    PartD:  $10325476;
-    PartE:  $C3D2E1F0);
+  InitialSHA0: TSHA0 = ($67,$45,$23,$01,$EF,$CD,$AB,$89,$98,$BA,
+                        $DC,$FE,$10,$32,$54,$76,$C3,$D2,$E1,$F0); 
+  ZeroSHA0:    TSHA0 = ($00,$00,$00,$00,$00,$00,$00,$00,$00,$00,
+                        $00,$00,$00,$00,$00,$00,$00,$00,$00,$00);
 
-  ZeroSHA0: TSHA0Hash = (PartA: 0; PartB: 0; PartC: 0; PartD: 0; PartE: 0);
+type
+  ESHA0Exception = class(EHashException);
 
-Function SHA0toStr(Hash: TSHA0Hash): String;
-Function StrToSHA0(Str: String): TSHA0Hash;
-Function TryStrToSHA0(const Str: String; out Hash: TSHA0Hash): Boolean;
-Function StrToSHA0Def(const Str: String; Default: TSHA0Hash): TSHA0Hash;
+  ESHA0IncompatibleClass = class(ESHA0Exception);
+  ESHA0ProcessingError   = class(ESHA0Exception);
 
-Function CompareSHA0(A,B: TSHA0Hash): Integer;
-Function SameSHA0(A,B: TSHA0Hash): Boolean;
+{-------------------------------------------------------------------------------
+================================================================================
+                                    TSHA0Hash                                    
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    TSHA0Hash - class declaration
+===============================================================================}
+type
+  TSHA0Hash = class(TBlockHash)
+  private
+    fSHA0: TSHA0Sys;
+    Function GetSHA0: TSHA0;
+  protected
+    procedure ProcessBlock(const Block); override;
+    procedure ProcessFirst(const Block); override;
+    procedure ProcessLast; override;
+    procedure Initialize; override;
+  public
+    class Function SHA0ToSys(SHA0: TSHA0): TSHA0Sys; virtual;
+    class Function SHA0FromSys(SHA0: TSHA0Sys): TSHA0; virtual;
+    class Function SHA0ToLE(SHA0: TSHA0): TSHA0; virtual;
+    class Function SHA0ToBE(SHA0: TSHA0): TSHA0; virtual;
+    class Function SHA0FromLE(SHA0: TSHA0): TSHA0; virtual;
+    class Function SHA0FromBE(SHA0: TSHA0): TSHA0; virtual;
+    class Function HashSize: TMemSize; override;
+    class Function HashName: String; override;
+    class Function HashEndianness: THashEndianness; override;
+    constructor CreateAndInitFrom(Hash: THashBase); overload; override;
+    constructor CreateAndInitFrom(Hash: TSHA0); overload; virtual;
+    procedure Init; override;
+    Function Compare(Hash: THashBase): Integer; override;
+    Function AsString: String; override;
+    procedure FromString(const Str: String); override;
+    procedure FromStringDef(const Str: String; const Default: TSHA0); reintroduce;
+    procedure SaveToStream(Stream: TStream; Endianness: THashEndianness = heDefault); override;
+    procedure LoadFromStream(Stream: TStream; Endianness: THashEndianness = heDefault); override;
+    property SHA0: TSHA0 read GetSHA0;
+    property SHA0Sys: TSHA0Sys read fSHA0;
+  end;
 
-Function BinaryCorrectSHA0(Hash: TSHA0Hash): TSHA0Hash;
+{===============================================================================
+    Backward compatibility functions
+===============================================================================}
 
-procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TMemSize); overload;
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0Hash; overload;
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize): TSHA0Hash; overload;
 
-Function BufferSHA0(const Buffer; Size: TMemSize): TSHA0Hash; overload;
+Function SHA0toStr(SHA0: TSHA0): String;
+Function StrToSHA0(Str: String): TSHA0;
+Function TryStrToSHA0(const Str: String; out SHA0: TSHA0): Boolean;
+Function StrToSHA0Def(const Str: String; Default: TSHA0): TSHA0;
 
-Function AnsiStringSHA0(const Str: AnsiString): TSHA0Hash;{$IFDEF CanInline} inline; {$ENDIF}
-Function WideStringSHA0(const Str: WideString): TSHA0Hash;{$IFDEF CanInline} inline; {$ENDIF}
-Function StringSHA0(const Str: String): TSHA0Hash;{$IFDEF CanInline} inline; {$ENDIF}
+Function CompareSHA0(A,B: TSHA0): Integer;
+Function SameSHA0(A,B: TSHA0): Boolean;
 
-Function StreamSHA0(Stream: TStream; Count: Int64 = -1): TSHA0Hash;
-Function FileSHA0(const FileName: String): TSHA0Hash;
+Function BinaryCorrectSHA0(SHA0: TSHA0): TSHA0;
+
+//------------------------------------------------------------------------------
+
+procedure BufferSHA0(var SHA0: TSHA0; const Buffer; Size: TMemSize); overload;
+Function LastBufferSHA0(SHA0: TSHA0; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0; overload;
+Function LastBufferSHA0(SHA0: TSHA0; const Buffer; Size: TMemSize): TSHA0; overload;
+
+Function BufferSHA0(const Buffer; Size: TMemSize): TSHA0; overload;
+
+Function AnsiStringSHA0(const Str: AnsiString): TSHA0;
+Function WideStringSHA0(const Str: WideString): TSHA0;
+Function StringSHA0(const Str: String): TSHA0;
+
+Function StreamSHA0(Stream: TStream; Count: Int64 = -1): TSHA0;
+Function FileSHA0(const FileName: String): TSHA0;
 
 //------------------------------------------------------------------------------
 
@@ -103,63 +180,104 @@ type
 
 Function SHA0_Init: TSHA0Context;
 procedure SHA0_Update(Context: TSHA0Context; const Buffer; Size: TMemSize);
-Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TMemSize): TSHA0Hash; overload;
-Function SHA0_Final(var Context: TSHA0Context): TSHA0Hash; overload;
-Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0Hash;
-
+Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TMemSize): TSHA0; overload;
+Function SHA0_Final(var Context: TSHA0Context): TSHA0; overload;
+Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0;
 
 implementation
 
 uses
-  SysUtils, Math, BitOps, StrRect;
+  SysUtils,
+  BitOps;
 
 {$IFDEF FPC_DisableWarns}
   {$DEFINE FPCDWM}
   {$DEFINE W4055:={$WARN 4055 OFF}} // Conversion between ordinals and pointers is not portable
-  {$DEFINE W4056:={$WARN 4056 OFF}} // Conversion between ordinals and pointers is not portable
-  {$PUSH}{$WARN 2005 OFF} // Comment level $1 found
-  {$IF Defined(FPC) and (FPC_FULLVERSION >= 30000)}
-    {$DEFINE W5092:={$WARN 5092 OFF}} // Variable "$1" of a managed type does not seem to be initialized
-  {$ELSE}
-    {$DEFINE W5092:=}
-  {$IFEND}
-  {$POP}
+  {$DEFINE W4056:={$WARN 4056 OFF}} // Conversion between ordinals and pointers is not portable  
+  {$DEFINE W5057:={$WARN 5057 OFF}} // Local variable "$1" does not seem to be initialized
 {$ENDIF}
 
+{-------------------------------------------------------------------------------
+================================================================================
+                                    TSHA0Hash
+================================================================================
+-------------------------------------------------------------------------------}
+{===============================================================================
+    TSHA0Hash - calculation constants
+===============================================================================}
 const
-  BlockSize       = 64;                           // 512 bits
-{$IFDEF LargeBuffers}
-  BlocksPerBuffer = 16384;                        // 1MiB BufferSize
-{$ELSE}
-  BlocksPerBuffer = 64;                           // 4KiB BufferSize
-{$ENDIF}
-  BufferSize      = BlocksPerBuffer * BlockSize;  // size of read buffer
+  SHA0_ROUND_CONSTS: array[0..3] of UInt32 = ($5A827999, $6ED9EBA1, $8F1BBCDC, $CA62C1D6);
 
-  RoundConsts: array[0..3] of UInt32 = ($5A827999, $6ED9EBA1, $8F1BBCDC, $CA62C1D6);
+{===============================================================================
+    TSHA0Hash - class implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    TSHA0Hash - private methods
+-------------------------------------------------------------------------------}
 
-type
-  TBlockBuffer = array[0..BlockSize - 1] of UInt8;
-  PBlockBuffer = ^TBlockBuffer;
+Function TSHA0Hash.GetSHA0: TSHA0;
+begin
+Result := SHA0FromSys(fSHA0);
+end;
 
-  TSHA0Context_Internal = record
-    MessageHash:    TSHA0Hash;
-    MessageLength:  UInt64;
-    TransferSize:   UInt32;
-    TransferBuffer: TBlockBuffer;
-  end;
-  PSHA0Context_Internal = ^TSHA0Context_Internal;
+{-------------------------------------------------------------------------------
+    TSHA0Hash - protected methods
+-------------------------------------------------------------------------------}
 
-//==============================================================================
-
-Function BlockHash(Hash: TSHA0Hash; const Block): TSHA0Hash;
+procedure TSHA0Hash.ProcessBlock(const Block);
 var
+  Hash:           TSHA0Sys;
   i:              Integer;
-  Temp:           UInt32;
+  BlockWords:     array[0..15] of UInt32 absolute Block;
+  Schedule:       array[0..79] of UInt32;
   FuncResult:     UInt32;
   RoundConstant:  UInt32;
-  State:          array[0..79] of UInt32;  
-  BlockWords:     array[0..15] of UInt32 absolute Block;
+  Temp:           UInt32;
 begin
+Hash := fSHA0;
+// prepare state
+For i := 0 to 15 do
+  Schedule[i] := {$IFNDEF ENDIAN_BIG}EndianSwap{$ENDIF}(BlockWords[i]);
+For i := 16 to 79 do
+  Schedule[i] := Schedule[i - 3] xor Schedule[i - 8] xor Schedule[i - 14] xor Schedule[i - 16];
+// hashing rounds
+For i := 0 to 79 do
+  begin
+    case i of
+       0..19: begin
+                FuncResult := (Hash.PartB and Hash.PartC) or ((not Hash.PartB) and Hash.PartD);
+                RoundConstant := SHA0_ROUND_CONSTS[0];
+              end;
+      20..39: begin
+                FuncResult := Hash.PartB xor Hash.PartC xor Hash.PartD;
+                RoundConstant := SHA0_ROUND_CONSTS[1];
+              end;
+      40..59: begin
+                FuncResult := (Hash.PartB and Hash.PartC) or (Hash.PartB and Hash.PartD) or (Hash.PartC and Hash.PartD);
+                RoundConstant := SHA0_ROUND_CONSTS[2];
+              end;
+    else
+     {60..79:}  FuncResult := Hash.PartB xor Hash.PartC xor Hash.PartD;
+                RoundConstant := SHA0_ROUND_CONSTS[3];
+    end;
+  {$IFDEF OverflowChecks}{$Q-}{$ENDIF}
+    Temp := UInt32(ROL(Hash.PartA,5) + FuncResult + Hash.PartE + RoundConstant + Schedule[i]);
+  {$IFDEF OverflowChecks}{$Q+}{$ENDIF}
+    Hash.PartE := Hash.PartD;
+    Hash.PartD := Hash.PartC;
+    Hash.PartC := ROL(Hash.PartB,30);
+    Hash.PartB := Hash.PartA;
+    Hash.PartA := Temp;
+  end;
+// final calculation
+{$IFDEF OverflowChecks}{$Q-}{$ENDIF}
+fSHA0.PartA := UInt32(fSHA0.PartA + Hash.PartA);
+fSHA0.PartB := UInt32(fSHA0.PartB + Hash.PartB);
+fSHA0.PartC := UInt32(fSHA0.PartC + Hash.PartC);
+fSHA0.PartD := UInt32(fSHA0.PartD + Hash.PartD);
+fSHA0.PartE := UInt32(fSHA0.PartE + Hash.PartE);
+{$IFDEF OverflowChecks}{$Q+}{$ENDIF}
+(*
 Result := Hash;
 For i := 0 to 15 do State[i] := EndianSwap(BlockWords[i]);
 For i := 16 to 79 do State[i] := State[i - 3] xor State[i - 8] xor State[i - 14] xor State[i - 16];
@@ -198,292 +316,560 @@ Result.PartC := UInt32(Result.PartC + Hash.PartC);
 Result.PartD := UInt32(Result.PartD + Hash.PartD);
 Result.PartE := UInt32(Result.PartE + Hash.PartE);
 {$IFDEF OverflowCheck}{$Q+}{$ENDIF}
-end;
-
-//==============================================================================
-
-Function SHA0toStr(Hash: TSHA0Hash): String;
-begin
-Result := IntToHex(Hash.PartA,8) + IntToHex(Hash.PartB,8) +
-          IntToHex(Hash.PartC,8) + IntToHex(Hash.PartD,8) +
-          IntToHex(Hash.PartE,8);
+*)
 end;
 
 //------------------------------------------------------------------------------
 
-{$IFDEF FPCDWM}{$PUSH}W5092{$ENDIF}
-Function StrToSHA0(Str: String): TSHA0Hash;
+procedure TSHA0Hash.ProcessFirst(const Block);
 begin
-If Length(Str) < 40 then
-  Str := StringOfChar('0',40 - Length(Str)) + Str
-else
-  If Length(Str) > 40 then
-    Str := Copy(Str,Length(Str) - 39,40);
-Result.PartA := StrToInt('$' + Copy(Str,1,8));
-Result.PartB := StrToInt('$' + Copy(Str,9,8));
-Result.PartC := StrToInt('$' + Copy(Str,17,8));
-Result.PartD := StrToInt('$' + Copy(Str,25,8));
-Result.PartE := StrToInt('$' + Copy(Str,33,8));
-end;
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-
-//------------------------------------------------------------------------------
-
-Function TryStrToSHA0(const Str: String; out Hash: TSHA0Hash): Boolean;
-begin
-try
-  Hash := StrToSHA0(Str);
-  Result := True;
-except
-  Result := False;
-end;
+inherited;
+ProcessBlock(Block);
 end;
 
 //------------------------------------------------------------------------------
 
-Function StrToSHA0Def(const Str: String; Default: TSHA0Hash): TSHA0Hash;
+procedure TSHA0Hash.ProcessLast;
 begin
-If not TryStrToSHA0(Str,Result) then
-  Result := Default;
-end;
-
-//------------------------------------------------------------------------------
-
-Function CompareSHA0(A,B: TSHA0Hash): Integer;
-var
-  OverlayA:   array[0..4] of UInt32 absolute A;
-  OverlayB:   array[0..4] of UInt32 absolute B;
-  i:          Integer;
-begin
-Result := 0;
-For i := Low(OverlayA) to High(OverlayA) do
-  If OverlayA[i] > OverlayB[i] then
-    begin
-      Result := -1;
-      Break;
-    end
-  else If OverlayA[i] < OverlayB[i] then
-    begin
-      Result := 1;
-      Break;
-    end;
-end;
-
-//------------------------------------------------------------------------------
-
-Function SameSHA0(A,B: TSHA0Hash): Boolean;
-begin
-Result := (A.PartA = B.PartA) and (A.PartB = B.PartB) and
-          (A.PartC = B.PartC) and (A.PartD = B.PartD) and
-          (A.PartE = B.PartE);
-end;
-
-//------------------------------------------------------------------------------
-
-Function BinaryCorrectSHA0(Hash: TSHA0Hash): TSHA0Hash;
-begin
-Result.PartA := EndianSwap(Hash.PartA);
-Result.PartB := EndianSwap(Hash.PartB);
-Result.PartC := EndianSwap(Hash.PartC);
-Result.PartD := EndianSwap(Hash.PartD);
-Result.PartE := EndianSwap(Hash.PartE);
-end;
-
-//==============================================================================
-
-procedure BufferSHA0(var Hash: TSHA0Hash; const Buffer; Size: TMemSize);
-var
-  i:    TMemSize;
-  Buff: PBlockBuffer;
-begin
-If Size > 0 then
+If (fBlockSize - fTempCount) >= (SizeOf(UInt64) + 1) then
   begin
-    If (Size mod BlockSize) = 0 then
+    // padding and length can fit
+  {$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
+    FillChar(Pointer(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^,fBlockSize - fTempCount,0);
+    PUInt8(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^ := $80;
+    PUInt64(PtrUInt(fTempBlock) - SizeOf(UInt64) + PtrUInt(fBlockSize))^ :=
+      {$IFNDEF ENDIAN_BIG}EndianSwap{$ENDIF}(UInt64(fProcessedBytes) * 8);
+  {$IFDEF FPCDWM}{$POP}{$ENDIF}
+    ProcessBlock(fTempBlock^);
+  end
+else
+  begin
+    // padding and length cannot fit  
+    If fBlockSize > fTempCount then
       begin
-        Buff := @Buffer;
-        For i := 0 to Pred(Size div BlockSize) do
-          begin
-            Hash := BlockHash(Hash,Buff^);
-            Inc(Buff);
-          end;
+      {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
+        FillChar(Pointer(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^,fBlockSize - fTempCount,0);
+        PUInt8(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^ := $80;
+      {$IFDEF FPCDWM}{$POP}{$ENDIF}
+        ProcessBlock(fTempBlock^);
+        FillChar(fTempBlock^,fBlockSize,0);
+      {$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
+        PUInt64(PtrUInt(fTempBlock) - SizeOf(UInt64) + PtrUInt(fBlockSize))^ :=
+          {$IFNDEF ENDIAN_BIG}EndianSwap{$ENDIF}(UInt64(fProcessedBytes) * 8);
+      {$IFDEF FPCDWM}{$POP}{$ENDIF}
+        ProcessBlock(fTempBlock^);        
       end
-    else raise Exception.CreateFmt('BufferSHA0: Buffer size is not divisible by %d.',[BlockSize]);
+    else raise ESHA0ProcessingError.CreateFmt('TSHA0Hash.ProcessLast: Invalid data transfer (%d).',[fTempCount]);
   end;
 end;
 
 //------------------------------------------------------------------------------
 
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0Hash;
+procedure TSHA0Hash.Initialize;
+begin
+fBlockSize := 64; // 512 bits
+inherited;
+fSHA0 := SHA0ToSys(ZeroSHA0);
+end;
+
+{-------------------------------------------------------------------------------
+    TSHA0Hash - public methods
+-------------------------------------------------------------------------------}
+
+class Function TSHA0Hash.SHA0ToSys(SHA0: TSHA0): TSHA0Sys;
 var
-  FullBlocks:     TMemSize;
-  LastBlockSize:  TMemSize;
-  HelpBlocks:     TMemSize;
-  HelpBlocksBuff: Pointer;
+  Temp: TSHA0Sys absolute SHA0;
 begin
-Result := Hash;
-FullBlocks := Size div BlockSize;
-If FullBlocks > 0 then BufferSHA0(Result,Buffer,FullBlocks * BlockSize);
-LastBlockSize := Size - (UInt64(FullBlocks) * BlockSize);
-HelpBlocks := Ceil((LastBlockSize + SizeOf(UInt64) + 1) / BlockSize);
-HelpBlocksBuff := AllocMem(HelpBlocks * BlockSize);
-try
-{$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
-  Move(Pointer(PtrUInt(@Buffer) + (FullBlocks * BlockSize))^,HelpBlocksBuff^,LastBlockSize);
-  PUInt8(PtrUInt(HelpBlocksBuff) + LastBlockSize)^ := $80;
-  PUInt64(PtrUInt(HelpBlocksBuff) + (UInt64(HelpBlocks) * BlockSize) - SizeOf(UInt64))^ := EndianSwap(MessageLength);
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-  BufferSHA0(Result,HelpBlocksBuff^,HelpBlocks * BlockSize);
-finally
-  FreeMem(HelpBlocksBuff,HelpBlocks * BlockSize);
-end;
+Result := Temp;
+{$IFNDEF ENDIAN_BIG}
+EndianSwapValue(Result.PartA);
+EndianSwapValue(Result.PartB);
+EndianSwapValue(Result.PartC);
+EndianSwapValue(Result.PartD);
+EndianSwapValue(Result.PartE);
+{$ENDIF}
 end;
 
 //------------------------------------------------------------------------------
 
-Function LastBufferSHA0(Hash: TSHA0Hash; const Buffer; Size: TMemSize): TSHA0Hash;
-begin
-Result := LastBufferSHA0(Hash,Buffer,Size,UInt64(Size) shl 3);
-end;
-
-//==============================================================================
-
-Function BufferSHA0(const Buffer; Size: TMemSize): TSHA0Hash;
-begin
-Result := LastBufferSHA0(InitialSHA0,Buffer,Size);
-end;
-
-//==============================================================================
-
-Function AnsiStringSHA0(const Str: AnsiString): TSHA0Hash;
-begin
-Result := BufferSHA0(PAnsiChar(Str)^,Length(Str) * SizeOf(AnsiChar));
-end;
-
-//------------------------------------------------------------------------------
-
-Function WideStringSHA0(const Str: WideString): TSHA0Hash;
-begin
-Result := BufferSHA0(PWideChar(Str)^,Length(Str) * SizeOf(WideChar));
-end;
-
-//------------------------------------------------------------------------------
-
-Function StringSHA0(const Str: String): TSHA0Hash;
-begin
-Result := BufferSHA0(PChar(Str)^,Length(Str) * SizeOf(Char));
-end;
-
-//==============================================================================
-
-Function StreamSHA0(Stream: TStream; Count: Int64 = -1): TSHA0Hash;
+class Function TSHA0Hash.SHA0FromSys(SHA0: TSHA0Sys): TSHA0;
 var
-  Buffer:         Pointer;
-  BytesRead:      Integer;
-  MessageLength:  UInt64;
+  Temp: TSHA0Sys absolute Result;
 begin
-If Assigned(Stream) then
+Temp := SHA0;
+{$IFNDEF ENDIAN_BIG}
+EndianSwapValue(Temp.PartA);
+EndianSwapValue(Temp.PartB);
+EndianSwapValue(Temp.PartC);
+EndianSwapValue(Temp.PartD);
+EndianSwapValue(Temp.PartE);
+{$ENDIF}
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.SHA0ToLE(SHA0: TSHA0): TSHA0;
+begin
+Result := SHA0;
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.SHA0ToBE(SHA0: TSHA0): TSHA0;
+begin
+Result := SHA0;
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.SHA0FromLE(SHA0: TSHA0): TSHA0;
+begin
+Result := SHA0;
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.SHA0FromBE(SHA0: TSHA0): TSHA0;
+begin
+Result := SHA0;
+end;
+ 
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.HashSize: TMemSize;
+begin
+Result := SizeOf(TSHA0);
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.HashName: String;
+begin
+Result := 'SHA0';
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.HashEndianness: THashEndianness;
+begin
+// first byte is most significant
+Result := heBig;
+end;
+
+//------------------------------------------------------------------------------
+
+constructor TSHA0Hash.CreateAndInitFrom(Hash: THashBase);
+begin
+inherited CreateAndInitFrom(Hash);
+If Hash is TSHA0Hash then
+  fSHA0 := TSHA0Hash(Hash).SHA0Sys
+else
+  raise ESHA0IncompatibleClass.CreateFmt('TSHA0Hash.CreateAndInitFrom: Incompatible class (%s).',[Hash.ClassName]);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+constructor TSHA0Hash.CreateAndInitFrom(Hash: TSHA0);
+begin
+CreateAndInit;
+fSHA0 := SHA0ToSys(Hash);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure TSHA0Hash.Init;
+begin
+inherited;
+fSHA0 := SHA0toSys(InitialSHA0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function TSHA0Hash.Compare(Hash: THashBase): Integer;
+var
+  A,B:  TSHA0;
+  i:    Integer;
+begin
+If Hash is TSHA0Hash then
   begin
-    If Count = 0 then
-      Count := Stream.Size - Stream.Position;
-    If Count < 0 then
-      begin
-        Stream.Position := 0;
-        Count := Stream.Size;
-      end;
-    MessageLength := UInt64(Count shl 3);
-    GetMem(Buffer,BufferSize);
-    try
-      Result := InitialSHA0;
-      repeat
-        BytesRead := Stream.Read(Buffer^,Min(BufferSize,Count));
-        If BytesRead < BufferSize then
-          Result := LastBufferSHA0(Result,Buffer^,BytesRead,MessageLength)
-        else
-          BufferSHA0(Result,Buffer^,BytesRead);
-        Dec(Count,BytesRead);
-      until BytesRead < BufferSize;
-    finally
-      FreeMem(Buffer,BufferSize);
-    end;
+    Result := 0;
+    A := SHA0FromSys(fSHA0);
+    B := TSHA0Hash(Hash).SHA0;
+    For i := Low(A) to High(A) do
+      If A[i] > B[i] then
+        begin
+          Result := +1;
+          Break;
+        end
+      else If A[i] < B[i] then
+        begin
+          Result := -1;
+          Break;
+        end;
   end
-else raise Exception.Create('StreamSHA0: Stream is not assigned.');
+else raise ESHA0IncompatibleClass.CreateFmt('TSHA0Hash.Compare: Incompatible class (%s).',[Hash.ClassName]);
 end;
 
 //------------------------------------------------------------------------------
 
-Function FileSHA0(const FileName: String): TSHA0Hash;
+Function TSHA0Hash.AsString: String;
 var
-  FileStream: TFileStream;
+  Temp: TSHA0;
+  i:    Integer;
 begin
-FileStream := TFileStream.Create(StrToRTL(FileName), fmOpenRead or fmShareDenyWrite);
+Result := StringOfChar('0',HashSize * 2);
+Temp := SHA0FromSys(fSHA0);
+For i := Low(Temp) to High(Temp) do
+  begin
+    Result[(i * 2) + 2] := IntToHex(Temp[i] and $0F,1)[1];
+    Result[(i * 2) + 1] := IntToHex(Temp[i] shr 4,1)[1];
+  end;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure TSHA0Hash.FromString(const Str: String);
+var
+  TempStr:  String;
+  i:        Integer;
+  SHA0:     TSHA0;
+begin
+If Length(Str) < Integer(HashSize * 2) then
+  TempStr := StringOfChar('0',Integer(HashSize * 2) - Length(Str)) + Str
+else If Length(Str) > Integer(HashSize * 2) then
+  TempStr := Copy(Str,Length(Str) - Pred(Integer(HashSize * 2)),Integer(HashSize * 2))
+else
+  TempStr := Str;
+For i := Low(SHA0) to High(SHA0) do
+  SHA0[i] := UInt8(StrToInt('$' + Copy(TempStr,(i * 2) + 1,2)));
+fSHA0 := SHA0ToSys(SHA0);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure TSHA0Hash.FromStringDef(const Str: String; const Default: TSHA0);
+begin
+inherited FromStringDef(Str,Default);
+If not TryFromString(Str) then
+  fSHA0 := SHA0ToSys(Default);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure TSHA0Hash.SaveToStream(Stream: TStream; Endianness: THashEndianness = heDefault);
+var
+  Temp: TSHA0;
+begin
+case Endianness of
+  heSystem: Temp := {$IFDEF ENDIAN_BIG}SHA0ToBE{$ELSE}SHA0ToLE{$ENDIF}(SHA0FromSys(fSHA0));
+  heLittle: Temp := SHA0ToLE(SHA0FromSys(fSHA0));
+  heBig:    Temp := SHA0ToBE(SHA0FromSys(fSHA0));
+else
+ {heDefault}
+  Temp := SHA0FromSys(fSHA0);
+end;
+Stream.WriteBuffer(Temp,SizeOf(TSHA0));
+end;
+
+//------------------------------------------------------------------------------
+
+{$IFDEF FPCDWM}{$PUSH}W5057{$ENDIF}
+procedure TSHA0Hash.LoadFromStream(Stream: TStream; Endianness: THashEndianness = heDefault);
+var
+  Temp: TSHA0;
+begin
+Stream.ReadBuffer(Temp,SizeOf(TSHA0));
+case Endianness of
+  heSystem: fSHA0 := SHA0ToSys({$IFDEF ENDIAN_BIG}SHA0FromBE{$ELSE}SHA0FromLE{$ENDIF}(Temp));
+  heLittle: fSHA0 := SHA0ToSys(SHA0FromLE(Temp));
+  heBig:    fSHA0 := SHA0ToSys(SHA0FromBE(Temp));
+else
+ {heDefault}
+  fSHA0 := SHA0ToSys(Temp);
+end;
+end;
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
+
+
+{===============================================================================
+    Backward compatibility functions
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Backward compatibility functions - utility functions
+-------------------------------------------------------------------------------}
+
+Function SHA0toStr(SHA0: TSHA0): String;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.CreateAndInitFrom(SHA0);
 try
-  Result := StreamSHA0(FileStream);
+  Result := Hash.AsString;
 finally
-  FileStream.Free;
+  Hash.Free;
 end;
 end;
 
-//==============================================================================
+//------------------------------------------------------------------------------
+
+Function StrToSHA0(Str: String): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.FromString(Str);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function TryStrToSHA0(const Str: String; out SHA0: TSHA0): Boolean;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Result := Hash.TryFromString(Str);
+  If Result then
+    SHA0 := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function StrToSHA0Def(const Str: String; Default: TSHA0): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.FromStringDef(Str,Default);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function CompareSHA0(A,B: TSHA0): Integer;
+var
+  HashA:  TSHA0Hash;
+  HashB:  TSHA0Hash;
+begin
+HashA := TSHA0Hash.CreateAndInitFrom(A);
+try
+  HashB := TSHA0Hash.CreateAndInitFrom(B);
+  try
+    Result := HashA.Compare(HashB);
+  finally
+    HashB.Free;
+  end;
+finally
+  HashA.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SameSHA0(A,B: TSHA0): Boolean;
+var
+  HashA:  TSHA0Hash;
+  HashB:  TSHA0Hash;
+begin
+HashA := TSHA0Hash.CreateAndInitFrom(A);
+try
+  HashB := TSHA0Hash.CreateAndInitFrom(B);
+  try
+    Result := HashA.Same(HashB);
+  finally
+    HashB.Free;
+  end;
+finally
+  HashA.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function BinaryCorrectSHA0(SHA0: TSHA0): TSHA0;
+begin
+Result := SHA0;
+end;
+
+{-------------------------------------------------------------------------------
+    Backward compatibility functions - processing functions
+-------------------------------------------------------------------------------}
+
+procedure BufferSHA0(var SHA0: TSHA0; const Buffer; Size: TMemSize);
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.CreateAndInitFrom(SHA0);
+try
+  If Size > 0 then
+    begin
+      If (Size mod Hash.BlockSize) = 0 then
+        begin
+          Hash.Update(Buffer,Size);
+          SHA0 := Hash.SHA0;
+        end
+      else raise ESHA0ProcessingError.CreateFmt('BufferSHA0: Buffer size (%d) is not divisible by %d.',[Size,Hash.BlockSize]);
+    end;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function LastBufferSHA0(SHA0: TSHA0; const Buffer; Size: TMemSize; MessageLength: UInt64): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.CreateAndInitFrom(SHA0);
+try
+  Hash.ProcessedBytes := (MessageLength shr 3) - Size;
+  Hash.Final(Buffer,Size);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function LastBufferSHA0(SHA0: TSHA0; const Buffer; Size: TMemSize): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.CreateAndInitFrom(SHA0);
+try
+  Hash.Final(Buffer,Size);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function BufferSHA0(const Buffer; Size: TMemSize): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashBuffer(Buffer,Size);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function AnsiStringSHA0(const Str: AnsiString): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashAnsiString(Str);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+ 
+//------------------------------------------------------------------------------
+
+Function WideStringSHA0(const Str: WideString): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashWideString(Str);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function StringSHA0(const Str: String): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashString(Str);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+ 
+//------------------------------------------------------------------------------
+
+Function StreamSHA0(Stream: TStream; Count: Int64 = -1): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashStream(Stream,Count);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function FileSHA0(const FileName: String): TSHA0;
+var
+  Hash: TSHA0Hash;
+begin
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashFile(FileName);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
+end;
+
+{-------------------------------------------------------------------------------
+    Backward compatibility functions - context functions
+-------------------------------------------------------------------------------}
 
 Function SHA0_Init: TSHA0Context;
+var
+  Temp: TSHA0Hash;
 begin
-Result := AllocMem(SizeOf(TSHA0Context_Internal));
-with PSHA0Context_Internal(Result)^ do
-  begin
-    MessageHash := InitialSHA0;
-    MessageLength := 0;
-    TransferSize := 0;
-  end;
+Temp := TSHA0Hash.CreateAndInit;
+Result := TSHA0Context(Temp);
 end;
 
 //------------------------------------------------------------------------------
 
 procedure SHA0_Update(Context: TSHA0Context; const Buffer; Size: TMemSize);
-var
-  FullBlocks:     TMemSize;
-  RemainingSize:  TMemSize;
 begin
-with PSHA0Context_Internal(Context)^ do
-  begin
-    If TransferSize > 0 then
-      begin
-        If Size >= (BlockSize - TransferSize) then
-          begin
-            Inc(MessageLength,(BlockSize - TransferSize) shl 3);
-            Move(Buffer,TransferBuffer[TransferSize],BlockSize - TransferSize);
-            BufferSHA0(MessageHash,TransferBuffer,BlockSize);
-            RemainingSize := Size - (BlockSize - TransferSize);
-            TransferSize := 0;
-          {$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
-            SHA0_Update(Context,Pointer(PtrUInt(@Buffer) + (Size - RemainingSize))^,RemainingSize);
-          {$IFDEF FPCDWM}{$POP}{$ENDIF}
-          end
-        else
-          begin
-            Inc(MessageLength,Size shl 3);
-            Move(Buffer,TransferBuffer[TransferSize],Size);
-            Inc(TransferSize,Size);
-          end;  
-      end
-    else
-      begin
-        Inc(MessageLength,Size shl 3);
-        FullBlocks := Size div BlockSize;
-        BufferSHA0(MessageHash,Buffer,FullBlocks * BlockSize);
-        If (FullBlocks * BlockSize) < Size then
-          begin
-            TransferSize := Size - (UInt64(FullBlocks) * BlockSize);
-          {$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
-            Move(Pointer(PtrUInt(@Buffer) + (Size - TransferSize))^,TransferBuffer,TransferSize);
-          {$IFDEF FPCDWM}{$POP}{$ENDIF}
-          end;
-      end;
-  end;
+TSHA0Hash(Context).Update(Buffer,Size);
 end;
 
 //------------------------------------------------------------------------------
 
-Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TMemSize): TSHA0Hash;
+Function SHA0_Final(var Context: TSHA0Context; const Buffer; Size: TMemSize): TSHA0;
 begin
 SHA0_Update(Context,Buffer,Size);
 Result := SHA0_Final(Context);
@@ -491,19 +877,26 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function SHA0_Final(var Context: TSHA0Context): TSHA0Hash;
+Function SHA0_Final(var Context: TSHA0Context): TSHA0;
 begin
-with PSHA0Context_Internal(Context)^ do
-  Result := LastBufferSHA0(MessageHash,TransferBuffer,TransferSize,MessageLength);
-FreeMem(Context,SizeOf(TSHA0Context_Internal));
-Context := nil;
+TSHA0Hash(Context).Final;
+Result := TSHA0Hash(Context).SHA0;
+FreeAndNil(TSHA0Hash(Context));
 end;
 
 //------------------------------------------------------------------------------
 
-Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0Hash;
+Function SHA0_Hash(const Buffer; Size: TMemSize): TSHA0;
+var
+  Hash: TSHA0Hash;
 begin
-Result := LastBufferSHA0(InitialSHA0,Buffer,Size);
+Hash := TSHA0Hash.Create;
+try
+  Hash.HashBuffer(Buffer,Size);
+  Result := Hash.SHA0;
+finally
+  Hash.Free;
+end;
 end;
 
 end.
