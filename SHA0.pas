@@ -7,15 +7,15 @@
 -------------------------------------------------------------------------------}
 {===============================================================================
 
-  SHA0 calculation
+  SHA-0 calculation
 
-    Note that this unit is just a copy of SHA1 implementation with slightly
-    altered block calculation (SHA1 differs from SHA0 only in this small
+    Note that this unit is just a copy of SHA-1 implementation with slightly
+    altered block calculation (SHA-1 differs from SHA-0 only in this small
     detail).
 
   Version 1.2 (2020-04-28)
 
-  Last change 2020-04-28
+  Last change 2020-05-03
 
   ©2015-2020 František Milt
 
@@ -73,7 +73,7 @@ uses
   Type TSHA0Sys has no such guarantee and its internal structure depends on
   current implementation.
 
-  SHA0 does not differ in little and big endian form, as it is not a single
+  SHA-0 does not differ in little and big endian form, as it is not a single
   quantity, therefore methods like SHA0ToLE or SHA0ToBE do nothing and are
   present only for the sake of completeness.
 }
@@ -277,46 +277,6 @@ fSHA0.PartC := UInt32(fSHA0.PartC + Hash.PartC);
 fSHA0.PartD := UInt32(fSHA0.PartD + Hash.PartD);
 fSHA0.PartE := UInt32(fSHA0.PartE + Hash.PartE);
 {$IFDEF OverflowChecks}{$Q+}{$ENDIF}
-(*
-Result := Hash;
-For i := 0 to 15 do State[i] := EndianSwap(BlockWords[i]);
-For i := 16 to 79 do State[i] := State[i - 3] xor State[i - 8] xor State[i - 14] xor State[i - 16];
-For i := 0 to 79 do
-  begin
-    case i of
-       0..19: begin
-                FuncResult := (Hash.PartB and Hash.PartC) or ((not Hash.PartB) and Hash.PartD);
-                RoundConstant := RoundConsts[0];
-              end;
-      20..39: begin
-                FuncResult := Hash.PartB xor Hash.PartC xor Hash.PartD;
-                RoundConstant := RoundConsts[1];
-              end;
-      40..59: begin
-                FuncResult := (Hash.PartB and Hash.PartC) or (Hash.PartB and Hash.PartD) or (Hash.PartC and Hash.PartD);
-                RoundConstant := RoundConsts[2];
-              end;
-    else
-     {60..79:}  FuncResult := Hash.PartB xor Hash.PartC xor Hash.PartD;
-                RoundConstant := RoundConsts[3];
-    end;
-    {$IFDEF OverflowCheck}{$Q-}{$ENDIF}
-    Temp := UInt32(ROL(Hash.PartA,5) + FuncResult + Hash.PartE + RoundConstant + State[i]);
-    {$IFDEF OverflowCheck}{$Q+}{$ENDIF}
-    Hash.PartE := Hash.PartD;
-    Hash.PartD := Hash.PartC;
-    Hash.PartC := ROL(Hash.PartB,30);
-    Hash.PartB := Hash.PartA;
-    Hash.PartA := Temp;
-  end;
-{$IFDEF OverflowCheck}{$Q-}{$ENDIF}
-Result.PartA := UInt32(Result.PartA + Hash.PartA);
-Result.PartB := UInt32(Result.PartB + Hash.PartB);
-Result.PartC := UInt32(Result.PartC + Hash.PartC);
-Result.PartD := UInt32(Result.PartD + Hash.PartD);
-Result.PartE := UInt32(Result.PartE + Hash.PartE);
-{$IFDEF OverflowCheck}{$Q+}{$ENDIF}
-*)
 end;
 
 //------------------------------------------------------------------------------
@@ -445,7 +405,7 @@ end;
 
 class Function TSHA0Hash.HashName: String;
 begin
-Result := 'SHA0';
+Result := 'SHA-0';
 end;
 
 //------------------------------------------------------------------------------
