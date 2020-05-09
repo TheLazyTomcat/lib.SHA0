@@ -15,7 +15,7 @@
 
   Version 1.2 (2020-04-28)
 
-  Last change 2020-05-03
+  Last change 2020-05-10
 
   ©2015-2020 František Milt
 
@@ -78,10 +78,10 @@ uses
   present only for the sake of completeness.
 }
 type
-  TSHA0 = array[0..19] of UInt8;
+  TSHA0 = packed array[0..19] of UInt8;
   PSHA0 = ^TSHA0;
 
-  TSHA0Sys = record
+  TSHA0Sys = packed record
     PartA:  UInt32;
     PartB:  UInt32;
     PartC:  UInt32;
@@ -228,7 +228,7 @@ procedure TSHA0Hash.ProcessBlock(const Block);
 var
   Hash:           TSHA0Sys;
   i:              Integer;
-  BlockWords:     array[0..15] of UInt32 absolute Block;
+  BlockWords:     packed array[0..15] of UInt32 absolute Block;
   Schedule:       array[0..79] of UInt32;
   FuncResult:     UInt32;
   RoundConstant:  UInt32;
