@@ -13,9 +13,9 @@
     altered block calculation (SHA-1 differs from SHA-0 only in this small
     detail).
 
-  Version 1.2 (2020-04-28)
+  Version 1.2.1 (2020-07-13)
 
-  Last change 2020-05-10
+  Last change 2020-07-13
 
   ©2015-2020 František Milt
 
@@ -130,6 +130,7 @@ type
     class Function HashSize: TMemSize; override;
     class Function HashName: String; override;
     class Function HashEndianness: THashEndianness; override;
+    class Function HashFinalization: Boolean; override;
     constructor CreateAndInitFrom(Hash: THashBase); overload; override;
     constructor CreateAndInitFrom(Hash: TSHA0); overload; virtual;
     procedure Init; override;
@@ -291,35 +292,35 @@ end;
 
 procedure TSHA0Hash.ProcessLast;
 begin
-If (fBlockSize - fTempCount) >= (SizeOf(UInt64) + 1) then
+If (fBlockSize - fTransCount) >= (SizeOf(UInt64) + 1) then
   begin
     // padding and length can fit
   {$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
-    FillChar(Pointer(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^,fBlockSize - fTempCount,0);
-    PUInt8(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^ := $80;
-    PUInt64(PtrUInt(fTempBlock) - SizeOf(UInt64) + PtrUInt(fBlockSize))^ :=
+    FillChar(Pointer(PtrUInt(fTransBlock) + PtrUInt(fTransCount))^,fBlockSize - fTransCount,0);
+    PUInt8(PtrUInt(fTransBlock) + PtrUInt(fTransCount))^ := $80;
+    PUInt64(PtrUInt(fTransBlock) - SizeOf(UInt64) + PtrUInt(fBlockSize))^ :=
       {$IFNDEF ENDIAN_BIG}EndianSwap{$ENDIF}(UInt64(fProcessedBytes) * 8);
   {$IFDEF FPCDWM}{$POP}{$ENDIF}
-    ProcessBlock(fTempBlock^);
+    ProcessBlock(fTransBlock^);
   end
 else
   begin
     // padding and length cannot fit  
-    If fBlockSize > fTempCount then
+    If fBlockSize > fTransCount then
       begin
       {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
-        FillChar(Pointer(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^,fBlockSize - fTempCount,0);
-        PUInt8(PtrUInt(fTempBlock) + PtrUInt(fTempCount))^ := $80;
+        FillChar(Pointer(PtrUInt(fTransBlock) + PtrUInt(fTransCount))^,fBlockSize - fTransCount,0);
+        PUInt8(PtrUInt(fTransBlock) + PtrUInt(fTransCount))^ := $80;
       {$IFDEF FPCDWM}{$POP}{$ENDIF}
-        ProcessBlock(fTempBlock^);
-        FillChar(fTempBlock^,fBlockSize,0);
+        ProcessBlock(fTransBlock^);
+        FillChar(fTransBlock^,fBlockSize,0);
       {$IFDEF FPCDWM}{$PUSH}W4055 W4056{$ENDIF}
-        PUInt64(PtrUInt(fTempBlock) - SizeOf(UInt64) + PtrUInt(fBlockSize))^ :=
+        PUInt64(PtrUInt(fTransBlock) - SizeOf(UInt64) + PtrUInt(fBlockSize))^ :=
           {$IFNDEF ENDIAN_BIG}EndianSwap{$ENDIF}(UInt64(fProcessedBytes) * 8);
       {$IFDEF FPCDWM}{$POP}{$ENDIF}
-        ProcessBlock(fTempBlock^);        
+        ProcessBlock(fTransBlock^);        
       end
-    else raise ESHA0ProcessingError.CreateFmt('TSHA0Hash.ProcessLast: Invalid data transfer (%d).',[fTempCount]);
+    else raise ESHA0ProcessingError.CreateFmt('TSHA0Hash.ProcessLast: Invalid data transfer (%d).',[fTransCount]);
   end;
 end;
 
@@ -414,6 +415,13 @@ class Function TSHA0Hash.HashEndianness: THashEndianness;
 begin
 // first byte is most significant
 Result := heBig;
+end;
+
+//------------------------------------------------------------------------------
+
+class Function TSHA0Hash.HashFinalization: Boolean;
+begin
+Result := True;
 end;
 
 //------------------------------------------------------------------------------
