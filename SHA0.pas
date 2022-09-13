@@ -15,9 +15,9 @@
 
   Version 1.2.1 (2020-07-13)
 
-  Last change 2021-04-12
+  Last change 2022-09-13
 
-  ©2015-2021 František Milt
+  ©2015-2025 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -113,10 +113,9 @@ type
 ===============================================================================}
 type
   TSHA0Hash = class(TBlockHash)
-  private
-    fSHA0: TSHA0Sys;
-    Function GetSHA0: TSHA0;
   protected
+    fSHA0: TSHA0Sys;
+    Function GetSHA0: TSHA0; virtual;
     procedure ProcessBlock(const Block); override;
     procedure ProcessFirst(const Block); override;
     procedure ProcessLast; override;
@@ -214,7 +213,7 @@ const
     TSHA0Hash - class implementation
 ===============================================================================}
 {-------------------------------------------------------------------------------
-    TSHA0Hash - private methods
+    TSHA0Hash - protected methods
 -------------------------------------------------------------------------------}
 
 Function TSHA0Hash.GetSHA0: TSHA0;
@@ -222,9 +221,7 @@ begin
 Result := SHA0FromSys(fSHA0);
 end;
 
-{-------------------------------------------------------------------------------
-    TSHA0Hash - protected methods
--------------------------------------------------------------------------------}
+//------------------------------------------------------------------------------
 
 {$IFDEF OverflowChecks}{$Q-}{$ENDIF}
 procedure TSHA0Hash.ProcessBlock(const Block);
