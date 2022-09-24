@@ -15,7 +15,7 @@
 
   Version 1.2.1 (2020-07-13)
 
-  Last change 2022-09-13
+  Last change 2022-09-24
 
   ©2015-2025 František Milt
 
@@ -48,7 +48,7 @@
 unit SHA0;
 
 {$IFDEF FPC}
-  {$MODE Delphi}
+  {$MODE ObjFPC}
   {$DEFINE FPC_DisableWarns}
   {$MACRO ON}
 {$ENDIF}
@@ -496,7 +496,7 @@ procedure TSHA0Hash.FromString(const Str: String);
 var
   TempStr:  String;
   i:        Integer;
-  SHA0:     TSHA0;
+  TempSHA0: TSHA0;
 begin
 If Length(Str) < Integer(HashSize * 2) then
   TempStr := StringOfChar('0',Integer(HashSize * 2) - Length(Str)) + Str
@@ -504,9 +504,9 @@ else If Length(Str) > Integer(HashSize * 2) then
   TempStr := Copy(Str,Length(Str) - Pred(Integer(HashSize * 2)),Integer(HashSize * 2))
 else
   TempStr := Str;
-For i := Low(SHA0) to High(SHA0) do
-  SHA0[i] := UInt8(StrToInt('$' + Copy(TempStr,(i * 2) + 1,2)));
-fSHA0 := SHA0ToSys(SHA0);
+For i := Low(TempSHA0) to High(TempSHA0) do
+  TempSHA0[i] := UInt8(StrToInt('$' + Copy(TempStr,(i * 2) + 1,2)));
+fSHA0 := SHA0ToSys(TempSHA0);
 end;
 
 //------------------------------------------------------------------------------
